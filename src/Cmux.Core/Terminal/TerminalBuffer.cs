@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Cmux.Core.Terminal;
 
 /// <summary>
@@ -105,13 +107,25 @@ public class TerminalBuffer
     public void SetChar(int row, int col, char ch, TerminalAttribute attr)
     {
         if (row < 0 || row >= Rows || col < 0 || col >= Cols) return;
+        int width = Math.Max(1, TerminalUnicodeWidth.GetWidth(ch));
         _cells[row, col] = new TerminalCell
         {
             Character = ch,
             Attribute = attr,
             IsDirty = true,
-            Width = 1,
+            Width = width,
         };
+
+        if (width == 2 && col + 1 < Cols)
+        {
+            _cells[row, col + 1] = new TerminalCell
+            {
+                Character = '\0',
+                Attribute = attr,
+                IsDirty = true,
+                Width = 0,
+            };
+        }
     }
 
     /// <summary>
@@ -123,11 +137,26 @@ public class TerminalBuffer
         if (!ClampCursorToBounds())
             return;
 
+        int width = Math.Max(1, TerminalUnicodeWidth.GetWidth(c));
+
         if (_wrapPending && AutoWrapMode)
         {
             CarriageReturn();
             LineFeed();
             _wrapPending = false;
+        }
+
+        if (width > 1 && CursorCol + width > Cols)
+        {
+            if (AutoWrapMode)
+            {
+                CarriageReturn();
+                LineFeed();
+            }
+            else
+            {
+                return;
+            }
         }
 
         if (InsertMode)
@@ -144,17 +173,28 @@ public class TerminalBuffer
                 Character = c,
                 Attribute = CurrentAttribute,
                 IsDirty = true,
-                Width = 1,
+                Width = width,
             };
+
+            if (width == 2 && CursorCol + 1 < Cols)
+            {
+                _cells[CursorRow, CursorCol + 1] = new TerminalCell
+                {
+                    Character = '\0',
+                    Attribute = CurrentAttribute,
+                    IsDirty = true,
+                    Width = 0,
+                };
+            }
         }
 
-        if (CursorCol + 1 >= Cols)
+        if (CursorCol + width >= Cols)
         {
             _wrapPending = true;
         }
         else
         {
-            CursorCol++;
+            CursorCol += width;
         }
     }
 
@@ -612,16 +652,33 @@ public class TerminalBuffer
         for (int row = 0; row < rowCount; row++)
         {
             var text = snapshot.ScreenLines[row];
-            int colCount = Math.Min(Cols, text.Length);
-            for (int col = 0; col < colCount; col++)
+            int col = 0;
+            foreach (var ch in text)
             {
+                if (col >= Cols)
+                    break;
+
+                int width = Math.Max(1, TerminalUnicodeWidth.GetWidth(ch));
                 _cells[row, col] = new TerminalCell
                 {
-                    Character = text[col],
+                    Character = ch,
                     Attribute = TerminalAttribute.Default,
                     IsDirty = true,
-                    Width = 1,
+                    Width = width,
                 };
+
+                if (width == 2 && col + 1 < Cols)
+                {
+                    _cells[row, col + 1] = new TerminalCell
+                    {
+                        Character = '\0',
+                        Attribute = TerminalAttribute.Default,
+                        IsDirty = true,
+                        Width = 0,
+                    };
+                }
+
+                col += width;
             }
         }
 
@@ -644,14 +701,18 @@ public class TerminalBuffer
 
     private static string LineToText(TerminalCell[] line, int cols)
     {
-        var chars = new char[cols];
+        var sb = new StringBuilder(cols);
         for (int i = 0; i < cols; i++)
         {
-            var ch = i < line.Length ? line[i].Character : ' ';
-            chars[i] = ch == '\0' ? ' ' : ch;
+            var cell = i < line.Length ? line[i] : TerminalCell.Empty;
+            if (cell.Width == 0)
+                continue;
+
+            var ch = cell.Character;
+            sb.Append(ch == '\0' ? ' ' : ch);
         }
 
-        return new string(chars).TrimEnd();
+        return sb.ToString().TrimEnd();
     }
 
     private static TerminalCell[] TextToLine(string? text, int cols)
@@ -662,16 +723,33 @@ public class TerminalBuffer
 
         if (string.IsNullOrEmpty(text)) return line;
 
-        int len = Math.Min(cols, text.Length);
-        for (int i = 0; i < len; i++)
+        int col = 0;
+        foreach (var ch in text)
         {
-            line[i] = new TerminalCell
+            if (col >= cols)
+                break;
+
+            int width = Math.Max(1, TerminalUnicodeWidth.GetWidth(ch));
+            line[col] = new TerminalCell
             {
-                Character = text[i],
+                Character = ch,
                 Attribute = TerminalAttribute.Default,
                 IsDirty = true,
-                Width = 1,
+                Width = width,
             };
+
+            if (width == 2 && col + 1 < cols)
+            {
+                line[col + 1] = new TerminalCell
+                {
+                    Character = '\0',
+                    Attribute = TerminalAttribute.Default,
+                    IsDirty = true,
+                    Width = 0,
+                };
+            }
+
+            col += width;
         }
 
         return line;

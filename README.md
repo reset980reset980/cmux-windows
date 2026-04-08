@@ -1,71 +1,80 @@
 # cmux for Windows
 
-A dark, keyboard-first terminal multiplexer for Windows, inspired by tmux/cmux workflows but built natively with WPF + ConPTY.
+`cmux-windows`는 Windows용 네이티브 터미널 멀티플렉서입니다.  
+tmux/cmux 스타일의 작업 흐름을 Windows 환경에 맞게 WPF + ConPTY 기반으로 구현했습니다.
+
+어울리는 사용자는 다음과 같습니다.
+
+- 여러 프로젝트를 동시에 다루는 개발자
+- 탭, 분할창, 워크스페이스를 빠르게 오가고 싶은 사용자
+- Codex, Claude 같은 에이전트 작업을 여러 pane에서 병행하는 사용자
+- 실행 명령 기록, 세션 복구, 알림 추적이 필요한 사용자
 
 ---
 
-## Why / Who / What / How
+## 핵심 기능
 
-| Why (problem) | Who (for) | What (feature) | How to use |
-|---|---|---|---|
-| You lose context across projects and shells | Developers juggling many repos/tasks | **Workspaces + surfaces (tabs)** | `Ctrl+N` new workspace, `Ctrl+T` new surface, switch with `Ctrl+1..9` |
-| One terminal is never enough | CLI-heavy users, agent workflows | **Split panes** (right/down) | `Ctrl+D` split right, `Ctrl+Shift+D` split down, `Ctrl+Alt+Arrow` focus pane |
-| You miss important agent outputs | AI-assisted coding users (Claude/Codex/etc.) | **OSC notifications + unread tracking** | `Ctrl+I` open notifications, `Ctrl+Shift+U` jump to latest unread |
-| You need auditability of executed commands | Security-conscious / debugging workflows | **Command logs + history picker** | `Ctrl+Shift+L` logs, `Ctrl+Alt+H` command history, insert/run from UI |
-| You want full session recall after crashes/restarts | Long-running sessions | **Session persistence + transcript capture** | Auto restore on startup + open **Session Vault** (`Ctrl+Shift+V`) |
-| You want searchable output history like Termius vault | Anyone reviewing terminal sessions | **Session Vault browser** | Open vault, filter captures, preview transcript, copy/open file |
-| You need dark theme consistency and personalization | Users who care about UX/readability | **Dark UI + terminal theme customization** | Settings (`Ctrl+,`) for colors/font/cursor + workspace accents |
-| You want quick actions without mouse hunting | Keyboard-first power users | **Command palette + shortcuts** | `Ctrl+Shift+P` command palette, menu mirrors key flows |
-| You need automation from scripts/tools | Integrators/agent hooks | **Named pipe CLI API** (`cmux`) | `cmux notify`, `cmux workspace`, `cmux split`, `cmux status` |
+- 네이티브 **ConPTY 터미널 백엔드**
+- **워크스페이스 + 서피스(탭) + 분할 pane** 구조
+- **알림 패널 / unread 추적**
+- **명령 로그 / 히스토리 / 세션 보관함(Session Vault)**
+- **세션 복구**
+- **다크 UI / 키보드 중심 조작**
+- **CLI (`cmux`)를 통한 자동화**
 
----
+이번 개선 버전에는 다음도 포함됩니다.
 
-## Core capabilities
-
-- Native **ConPTY terminal emulation** (real Windows terminal backend)
-- Workspace sidebar with metadata (git branch, cwd, notifications)
-- Multi-surface tabs and split-pane layout management
-- Notification ingestion (OSC 9/99/777) for coding agents
-- Command logs/history with filtering and quick replay
-- Terminal transcript capture + Session Vault browsing
-- Persistent sessions (window + workspace/surface/pane state)
-- Dark desktop UI with keyboard-first navigation
+- 한글 출력 겹침 개선
+- pane 하단 **IME 입력 바** 추가
+- `F2`, `Ctrl+;` 로 IME 입력 바 포커스 이동
 
 ---
 
-## Screenshots
+## 왜 쓰는가
+
+| 문제 | 해결 방식 |
+|---|---|
+| 프로젝트마다 터미널 문맥이 섞임 | 워크스페이스로 작업 단위 분리 |
+| 터미널 하나로는 부족함 | 탭 + 분할 pane 제공 |
+| 에이전트 출력이나 긴 작업을 놓치기 쉬움 | 알림 패널, unread 추적 |
+| 어떤 명령을 실행했는지 다시 보고 싶음 | 명령 로그 / 히스토리 제공 |
+| 재시작 후 작업 상태가 끊김 | 세션 복구 / transcript 저장 |
+
+---
+
+## 스크린샷
 
 <details>
-  <summary>Open screenshots</summary>
+  <summary>스크린샷 보기</summary>
 
-  <p><strong>Main workspace view</strong></p>
+  <p><strong>메인 워크스페이스</strong></p>
   <img src="assets/screenshots/1.jpg" alt="cmux main workspace" width="1000" />
 
-  <p><strong>Snippets panel</strong></p>
+  <p><strong>스니펫 패널</strong></p>
   <img src="assets/screenshots/2.jpg" alt="cmux snippets panel" width="700" />
 
-  <p><strong>Command logs window</strong></p>
+  <p><strong>명령 로그 창</strong></p>
   <img src="assets/screenshots/3.jpg" alt="cmux command logs" width="1000" />
 </details>
 
 ---
 
-## Build and run (Windows)
+## 빌드 및 실행
 
-### Requirements
+### 요구사항
 
-- Windows 10/11
+- Windows 10 / 11
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- Optional: Visual Studio 2022 / Build Tools
+- 선택: Visual Studio 2022 / Build Tools
 
-### Clone
+### 클론
 
 ```powershell
 git clone <repo-url> cmux-windows
 cd cmux-windows
 ```
 
-### Dev run
+### 개발 실행
 
 ```powershell
 dotnet build Cmux.sln -c Debug
@@ -74,142 +83,163 @@ dotnet run --project src/Cmux/Cmux.csproj -c Debug
 
 ---
 
-## Build `.exe` on Windows
+## Windows 실행 파일 만들기
 
-### 1) Framework-dependent `.exe` (smallest output)
+### 1. Framework-dependent 빌드
 
 ```powershell
 dotnet publish src/Cmux/Cmux.csproj -c Release -r win-x64 --self-contained false -o publish/cmux-win-x64
 ```
 
-Output:
+출력:
+
 - `publish/cmux-win-x64/cmuxw.exe`
 
-Use this when target machines already have .NET runtime installed.
-
-### 2) Self-contained `.exe` (no runtime install needed)
+### 2. Self-contained 빌드
 
 ```powershell
 dotnet publish src/Cmux/Cmux.csproj -c Release -r win-x64 --self-contained true -o publish/cmux-win-x64-sc
 ```
 
-Output:
+출력:
+
 - `publish/cmux-win-x64-sc/cmuxw.exe`
 
-### 3) Single-file self-contained `.exe` (portable artifact)
+### 3. 단일 파일 빌드
 
 ```powershell
 dotnet publish src/Cmux/Cmux.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=false -o publish/cmux-win-x64-single
 ```
 
-Output:
+출력:
+
 - `publish/cmux-win-x64-single/cmuxw.exe`
 
-> Note: WebView2-backed features may require WebView2 Runtime depending on target system state.
-
-### Build CLI executable
+### CLI 빌드
 
 ```powershell
 dotnet publish src/Cmux.Cli/Cmux.Cli.csproj -c Release -r win-x64 --self-contained true -o publish/cmux-cli
 ```
 
-Add `publish/cmux-cli` to `PATH` to use `cmux` globally.
+전역 명령으로 쓰려면 `publish/cmux-cli`를 `PATH`에 추가하면 됩니다.
 
 ---
 
-## First 5 minutes (how to use)
+## 처음 5분 사용법
 
-1. Launch `cmuxw.exe`
-2. `Ctrl+N` to create a workspace for your repo
-3. `Ctrl+T` to create additional surfaces (tabs)
-4. Split panes with `Ctrl+D` / `Ctrl+Shift+D`
-5. Open command palette with `Ctrl+Shift+P` for quick actions
-6. Open logs with `Ctrl+Shift+L`
-7. Open Session Vault with `Ctrl+Shift+V`
-8. Open settings with `Ctrl+,` and tune terminal theme/font/cursor
-
----
-
-## Keyboard shortcuts
-
-### Workspaces
-
-| Shortcut | Action |
-|---|---|
-| `Ctrl+N` | New workspace |
-| `Ctrl+1..8` | Jump to workspace 1..8 |
-| `Ctrl+9` | Jump to last workspace |
-| `Ctrl+Shift+W` | Close workspace |
-| `Ctrl+Shift+R` | Rename workspace |
-| `Ctrl+B` | Toggle sidebar |
-
-### Surfaces (tabs)
-
-| Shortcut | Action |
-|---|---|
-| `Ctrl+T` | New surface |
-| `Ctrl+W` | Close surface |
-| `Ctrl+Shift+]` | Next surface |
-| `Ctrl+Shift+[` | Previous surface |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Cycle surfaces |
-
-### Panes
-
-| Shortcut | Action |
-|---|---|
-| `Ctrl+D` | Split right |
-| `Ctrl+Shift+D` | Split down |
-| `Ctrl+Alt+Arrow` | Focus adjacent pane |
-| `Ctrl+Shift+Z` | Zoom/unzoom pane |
-
-### Productivity
-
-| Shortcut | Action |
-|---|---|
-| `Ctrl+Shift+P` | Command palette |
-| `Ctrl+Shift+F` | Search overlay |
-| `Ctrl+Shift+L` | Command logs |
-| `Ctrl+Shift+V` | Session vault |
-| `Ctrl+Alt+H` | Command history picker |
-| `Ctrl+,` | Settings |
+1. `cmuxw.exe` 실행
+2. `Ctrl+N` 으로 워크스페이스 생성
+3. `Ctrl+T` 로 새 서피스(탭) 생성
+4. `Ctrl+D`, `Ctrl+Shift+D` 로 pane 분할
+5. `Ctrl+Shift+P` 로 커맨드 팔레트 열기
+6. `Ctrl+Shift+L` 로 로그 열기
+7. `Ctrl+Shift+V` 로 Session Vault 열기
+8. `Ctrl+,` 로 설정 열기
 
 ---
 
-## CLI usage
+## 한글 입력 안내
+
+영문과 일반 명령 입력은 terminal에 직접 입력하면 됩니다.
+
+한글은 환경에 따라 IME 조합 입력이 terminal 본문에서 불안정할 수 있어서, 이 개선 버전에서는 **pane 하단 IME 입력 바**를 함께 제공합니다.
+
+권장 방식:
+
+- 영어 / 쉘 명령: terminal 직접 입력
+- 한글 문장: pane 하단 `IME` 입력 바 사용
+
+IME 입력 바 사용법:
+
+- `F2` 또는 `Ctrl+;` : 현재 pane의 IME 입력 바로 포커스 이동
+- 한글 입력 후 `Enter` : terminal로 전송
+- `Esc` : terminal로 다시 포커스 복귀
+- `Send` 버튼 클릭으로도 전송 가능
+
+---
+
+## 기본 단축키
+
+### 워크스페이스
+
+| 단축키 | 동작 |
+|---|---|
+| `Ctrl+N` | 새 워크스페이스 |
+| `Ctrl+1..8` | 워크스페이스 1..8 이동 |
+| `Ctrl+9` | 마지막 워크스페이스 이동 |
+| `Ctrl+Shift+W` | 워크스페이스 닫기 |
+| `Ctrl+Shift+R` | 워크스페이스 이름 변경 |
+| `Ctrl+B` | 사이드바 토글 |
+
+### 서피스(탭)
+
+| 단축키 | 동작 |
+|---|---|
+| `Ctrl+T` | 새 서피스 |
+| `Ctrl+W` | 서피스 닫기 |
+| `Ctrl+Shift+]` | 다음 서피스 |
+| `Ctrl+Shift+[` | 이전 서피스 |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | 서피스 순환 |
+
+### Pane
+
+| 단축키 | 동작 |
+|---|---|
+| `Ctrl+D` | 오른쪽 분할 |
+| `Ctrl+Shift+D` | 아래 분할 |
+| `Ctrl+Alt+Arrow` | 인접 pane 포커스 이동 |
+| `Ctrl+Shift+Z` | pane 확대 / 복귀 |
+| `F2` | IME 입력 바 포커스 |
+| `Ctrl+;` | IME 입력 바 포커스 |
+
+### 생산성
+
+| 단축키 | 동작 |
+|---|---|
+| `Ctrl+Shift+P` | 커맨드 팔레트 |
+| `Ctrl+Shift+F` | 검색 오버레이 |
+| `Ctrl+Shift+L` | 명령 로그 |
+| `Ctrl+Shift+V` | Session Vault |
+| `Ctrl+Alt+H` | 명령 히스토리 |
+| `Ctrl+,` | 설정 |
+
+---
+
+## CLI 사용 예시
 
 ```powershell
-# Send a notification (e.g., from agent hooks)
-cmux notify --title "Claude Code" --body "Waiting for input"
+# 알림 보내기
+cmux notify --title "Codex" --body "작업 완료"
 
-# Workspace management
+# 워크스페이스 관리
 cmux workspace list
 cmux workspace create --name "My Project"
 cmux workspace select --index 0
 
-# Surface/pane actions
+# 서피스 / pane 동작
 cmux surface create
 cmux split right
 cmux split down
 
-# Inspect status
+# 상태 확인
 cmux status
 ```
 
 ---
 
-## Architecture (high level)
+## 아키텍처
 
 ```text
 src/
-  Cmux/         WPF desktop app (views, controls, themes)
-  Cmux.Core/    terminal engine, models, services, persistence, IPC
-  Cmux.Cli/     command-line client for automation
+  Cmux/         WPF 데스크톱 앱 (뷰, 컨트롤, 테마)
+  Cmux.Core/    터미널 엔진, 모델, 서비스, 저장, IPC
+  Cmux.Cli/     자동화용 CLI
 tests/
-  Cmux.Tests/   unit tests
+  Cmux.Tests/   단위 테스트
 ```
 
 ---
 
-## License
+## 라이선스
 
 MIT

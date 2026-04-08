@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using Cmux.Core.Models;
 using Cmux.Core.Config;
@@ -262,7 +263,98 @@ public class SplitPaneContainer : ContentControl
         headerGrid.Children.Add(closeButton);
         header.Child = headerGrid;
 
+        var imeBar = new Border
+        {
+            Background = GetThemeBrush("SidebarItemHoverBrush"),
+            BorderBrush = GetThemeBrush("BorderBrush"),
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            Padding = new Thickness(8, 4, 8, 4),
+        };
+        DockPanel.SetDock(imeBar, Dock.Bottom);
+
+        var imeGrid = new Grid();
+        imeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        imeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        imeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var imeLabel = new TextBlock
+        {
+            Text = "IME",
+            FontSize = 10,
+            Foreground = GetThemeBrush("ForegroundDimBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 8, 0),
+        };
+        Grid.SetColumn(imeLabel, 0);
+
+        var imeInput = new TextBox
+        {
+            MinWidth = 160,
+            Padding = new Thickness(6, 3, 6, 3),
+            Background = GetThemeBrush("BackgroundBrush"),
+            Foreground = GetThemeBrush("ForegroundBrush"),
+            BorderBrush = GetThemeBrush("BorderBrush"),
+            BorderThickness = new Thickness(1),
+            ToolTip = "Korean/IME input buffer. Press Enter to send to terminal, Esc to return focus.",
+        };
+        imeInput.GotKeyboardFocus += (_, _) => _surface?.FocusPane(paneId);
+        imeInput.KeyDown += (_, e) =>
+        {
+            if (e.Key == System.Windows.Input.Key.Enter)
+            {
+                var text = imeInput.Text;
+                imeInput.Clear();
+                terminal.SendCommittedInput(text);
+                terminal.Focus();
+                e.Handled = true;
+            }
+            else if (e.Key == System.Windows.Input.Key.Escape)
+            {
+                terminal.Focus();
+                e.Handled = true;
+            }
+        };
+        Grid.SetColumn(imeInput, 1);
+
+        terminal.PreviewKeyDown += (_, e) =>
+        {
+            bool focusIme = e.Key == System.Windows.Input.Key.F2
+                || (Keyboard.Modifiers.HasFlag(System.Windows.Input.ModifierKeys.Control)
+                    && e.Key == System.Windows.Input.Key.OemSemicolon);
+
+            if (!focusIme)
+                return;
+
+            _surface?.FocusPane(paneId);
+            imeInput.Focus();
+            imeInput.SelectAll();
+            e.Handled = true;
+        };
+
+        var sendButton = new Button
+        {
+            Content = "Send",
+            Margin = new Thickness(8, 0, 0, 0),
+            Padding = new Thickness(10, 3, 10, 3),
+            MinWidth = 56,
+            Cursor = System.Windows.Input.Cursors.Hand,
+        };
+        sendButton.Click += (_, _) =>
+        {
+            var text = imeInput.Text;
+            imeInput.Clear();
+            terminal.SendCommittedInput(text);
+            terminal.Focus();
+        };
+        Grid.SetColumn(sendButton, 2);
+
+        imeGrid.Children.Add(imeLabel);
+        imeGrid.Children.Add(imeInput);
+        imeGrid.Children.Add(sendButton);
+        imeBar.Child = imeGrid;
+
         panel.Children.Add(header);
+        panel.Children.Add(imeBar);
         panel.Children.Add(terminal);
 
         var focusedAccent = GetThemeColor("AccentColor");

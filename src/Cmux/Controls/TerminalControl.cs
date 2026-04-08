@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows;
@@ -9,6 +10,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Interop;
 using Cmux.Core.Config;
 using Cmux.Core.Models;
 using Cmux.Core.Terminal;
@@ -69,6 +71,15 @@ public class TerminalControl : FrameworkElement
     private Typeface? _typefaceBoldItalic;
     private readonly StringBuilder _textRunBuffer = new();
     private bool _suppressNextEnterTextInput;
+    private bool _imeComposing;
+    private string _imeCompositionText = string.Empty;
+    private string? _suppressDuplicateImeText;
+    private HwndSource? _hwndSource;
+
+    private const int WM_IME_STARTCOMPOSITION = 0x010D;
+    private const int WM_IME_ENDCOMPOSITION = 0x010E;
+    private const int WM_IME_COMPOSITION = 0x010F;
+    private const int GCS_RESULTSTR = 0x0800;
 
     /// <summary>Fired when the pane wants focus.</summary>
     public event Action? FocusRequested;
@@ -140,6 +151,10 @@ public class TerminalControl : FrameworkElement
         AllowDrop = true;
 
         _selection.SelectionChanged += () => RequestRender(System.Windows.Threading.DispatcherPriority.Render);
+        TextCompositionManager.AddPreviewTextInputStartHandler(this, OnPreviewTextInputStart);
+        TextCompositionManager.AddPreviewTextInputUpdateHandler(this, OnPreviewTextInputUpdate);
+        Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
 
         // Cursor blink
         _cursorTimer = new System.Windows.Threading.DispatcherTimer
@@ -177,6 +192,25 @@ public class TerminalControl : FrameworkElement
         _session.BellReceived += OnBell;
         CalculateTerminalSize();
         Render();
+    }
+
+    public void SendCommittedInput(string text)
+    {
+        if (_session == null || string.IsNullOrWhiteSpace(text))
+            return;
+
+        var normalized = text.Replace("\r", string.Empty).Replace("\n", string.Empty);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        EnsureLiveView();
+        _selection.ClearSelection();
+        _inputLineBuffer.Clear();
+        TrackInputText(normalized);
+        CommandSubmitted?.Invoke(normalized.Trim());
+        _inputLineBuffer.Clear();
+        _session.Write(normalized);
+        _session.Write("\r");
     }
 
     private void OnRedraw()
@@ -463,19 +497,25 @@ public class TerminalControl : FrameworkElement
                         cellBg = _theme.SelectionBackground.Value;
 
                     // Draw cell background
-                    if (!cellBg.IsDefault)
+                    int cellWidthUnits = Math.Max(0, cell.Width);
+                    double cellRectWidth = Math.Max(_cellWidth, cellWidthUnits * _cellWidth);
+
+                    if (!cellBg.IsDefault && cellWidthUnits != 0)
                     {
                         dc.DrawRectangle(GetCachedBrush(ToWpfColor(cellBg)), null,
-                            new Rect(x, y, _cellWidth, _cellHeight));
+                            new Rect(x, y, cellRectWidth, _cellHeight));
                     }
 
                     // Search match highlight (behind text)
                     bool isSearchMatch = searchMatchSet.Contains((visRow, c));
                     bool isCurrentMatch = currentMatchSet.Contains((visRow, c));
-                    if (isCurrentMatch)
-                        dc.DrawRectangle(currentMatchBrush, null, new Rect(x, y, _cellWidth, _cellHeight));
-                    else if (isSearchMatch)
-                        dc.DrawRectangle(searchMatchBrush, null, new Rect(x, y, _cellWidth, _cellHeight));
+                    if (cellWidthUnits != 0)
+                    {
+                        if (isCurrentMatch)
+                            dc.DrawRectangle(currentMatchBrush, null, new Rect(x, y, cellRectWidth, _cellHeight));
+                        else if (isSearchMatch)
+                            dc.DrawRectangle(searchMatchBrush, null, new Rect(x, y, cellRectWidth, _cellHeight));
+                    }
 
                     // URL hover highlight
                     if (_hoveredUrl is { } url && visRow == url.row && c >= url.startCol && c <= url.endCol)
@@ -609,7 +649,7 @@ public class TerminalControl : FrameworkElement
         double x = startCol * _cellWidth;
         dc.DrawText(text, new Point(x, y));
 
-        double runWidth = _textRunBuffer.Length * _cellWidth;
+        double runWidth = TerminalUnicodeWidth.GetWidth(_textRunBuffer.ToString()) * _cellWidth;
 
         if (underline)
         {
@@ -856,7 +896,38 @@ public class TerminalControl : FrameworkElement
 
     protected override void OnTextInput(TextCompositionEventArgs e)
     {
-        if (_session == null || string.IsNullOrEmpty(e.Text)) return;
+        if (_session == null) return;
+
+        if (!string.IsNullOrEmpty(_suppressDuplicateImeText) && e.Text == _suppressDuplicateImeText)
+        {
+            _suppressDuplicateImeText = null;
+            e.Handled = true;
+            return;
+        }
+
+        var compositionText = e.TextComposition?.CompositionText ?? string.Empty;
+        if (!string.IsNullOrEmpty(compositionText))
+        {
+            _imeComposing = true;
+            _imeCompositionText = compositionText;
+            if (string.IsNullOrEmpty(e.Text) || LooksLikePureHangulJamo(e.Text))
+                e.Handled = true;
+            return;
+        }
+
+        if (_imeComposing)
+        {
+            if (string.IsNullOrEmpty(e.Text) || LooksLikePureHangulJamo(e.Text))
+            {
+                e.Handled = true;
+                return;
+            }
+
+            _imeComposing = false;
+            _imeCompositionText = string.Empty;
+        }
+
+        if (string.IsNullOrEmpty(e.Text)) return;
 
         // KeyDown handles Enter; suppress the trailing TextInput CR/LF when
         // an intercepted command consumed the shell submission.
@@ -899,6 +970,162 @@ public class TerminalControl : FrameworkElement
         _session.Write(e.Text);
         _selection.ClearSelection();
     }
+
+    private void OnPreviewTextInputStart(object sender, TextCompositionEventArgs e)
+    {
+        var compositionText = e.TextComposition?.CompositionText ?? string.Empty;
+        if (string.IsNullOrEmpty(compositionText))
+            return;
+
+        _imeComposing = true;
+        _imeCompositionText = compositionText;
+    }
+
+    private void OnPreviewTextInputUpdate(object sender, TextCompositionEventArgs e)
+    {
+        var compositionText = e.TextComposition?.CompositionText ?? string.Empty;
+        if (string.IsNullOrEmpty(compositionText))
+            return;
+
+        _imeComposing = true;
+        _imeCompositionText = compositionText;
+    }
+
+    protected override void OnLostKeyboardFocus(KeyboardFocusChangedEventArgs e)
+    {
+        _imeComposing = false;
+        _imeCompositionText = string.Empty;
+        _suppressDuplicateImeText = null;
+        base.OnLostKeyboardFocus(e);
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        if (_hwndSource != null)
+            return;
+
+        _hwndSource = PresentationSource.FromVisual(this) as HwndSource;
+        _hwndSource?.AddHook(WndProc);
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (_hwndSource == null)
+            return;
+
+        _hwndSource.RemoveHook(WndProc);
+        _hwndSource = null;
+    }
+
+    private nint WndProc(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled)
+    {
+        if (!IsKeyboardFocusWithin || _session == null)
+            return nint.Zero;
+
+        switch (msg)
+        {
+            case WM_IME_STARTCOMPOSITION:
+                _imeComposing = true;
+                _imeCompositionText = string.Empty;
+                break;
+
+            case WM_IME_ENDCOMPOSITION:
+                _imeComposing = false;
+                _imeCompositionText = string.Empty;
+                break;
+
+            case WM_IME_COMPOSITION:
+                if ((((int)lParam) & GCS_RESULTSTR) != 0)
+                {
+                    var result = GetImeResultString(hwnd);
+                    _imeComposing = false;
+                    _imeCompositionText = string.Empty;
+                    if (!string.IsNullOrEmpty(result))
+                    {
+                        CommitImeText(result);
+                        handled = true;
+                        return nint.Zero;
+                    }
+                }
+                break;
+        }
+
+        return nint.Zero;
+    }
+
+    private void CommitImeText(string text)
+    {
+        if (_session == null || string.IsNullOrEmpty(text))
+            return;
+
+        _suppressDuplicateImeText = text;
+        EnsureLiveView();
+        TrackInputText(text);
+        _session.Write(text);
+        _selection.ClearSelection();
+    }
+
+    private static bool LooksLikePureHangulJamo(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return false;
+
+        foreach (var ch in text)
+        {
+            if (!IsHangulJamo(ch))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsHangulJamo(char ch) =>
+        (ch >= '\u1100' && ch <= '\u11FF') ||
+        (ch >= '\u3130' && ch <= '\u318F') ||
+        (ch >= '\uA960' && ch <= '\uA97F') ||
+        (ch >= '\uD7B0' && ch <= '\uD7FF');
+
+    private static string GetImeResultString(nint hwnd)
+    {
+        var himc = ImmGetContext(hwnd);
+        if (himc == nint.Zero)
+            return string.Empty;
+
+        try
+        {
+            int byteCount = ImmGetCompositionStringW(himc, GCS_RESULTSTR, IntPtr.Zero, 0);
+            if (byteCount <= 0)
+                return string.Empty;
+
+            var buffer = Marshal.AllocHGlobal(byteCount);
+            try
+            {
+                int copied = ImmGetCompositionStringW(himc, GCS_RESULTSTR, buffer, byteCount);
+                if (copied <= 0)
+                    return string.Empty;
+
+                return Marshal.PtrToStringUni(buffer, copied / 2) ?? string.Empty;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+        finally
+        {
+            ImmReleaseContext(hwnd, himc);
+        }
+    }
+
+    [DllImport("imm32.dll")]
+    private static extern nint ImmGetContext(nint hWnd);
+
+    [DllImport("imm32.dll")]
+    private static extern bool ImmReleaseContext(nint hWnd, nint hIMC);
+
+    [DllImport("imm32.dll", CharSet = CharSet.Unicode)]
+    private static extern int ImmGetCompositionStringW(nint hIMC, int dwIndex, IntPtr lpBuf, int dwBufLen);
+
 
     private void PasteFromClipboard()
     {
